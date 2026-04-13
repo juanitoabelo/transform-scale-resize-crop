@@ -1,0 +1,74 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1200px 500px at 20% -10%, rgba(99, 102, 241, 0.18), transparent 55%),
+    radial-gradient(900px 400px at 100% 0%, rgba(16, 185, 129, 0.14), transparent 50%),
+    #f4f7fb;
+  color: #111827;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  background: transparent;
+}
+
+.app-nav {
+  background: linear-gradient(120deg, #1d4ed8, #4f46e5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.app-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: #86efac;
+  box-shadow: 0 0 16px rgba(134, 239, 172, 0.8);
+}
+
+.app-footer {
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(10px);
+}
+
+.editor-layout .editor-stage {
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.22);
+}
+
+.editor-layout .editor-card {
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78) !important;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 20px 36px rgba(15, 23, 42, 0.12);
+}
+
+.editor-card .card-title {
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.editor-card .form-label {
+  font-weight: 600;
+}
+
+.editor-card .btn {
+  border-radius: 10px;
+}
+
+.editor-card .form-control,
+.editor-card .form-select {
+  border-radius: 10px;
+}
+
+.editor-card .preview-shell {
+  background: linear-gradient(180deg, #eef2ff, #e2e8f0) !important;
+  border-color: rgba(148, 163, 184, 0.35) !important;
+}
