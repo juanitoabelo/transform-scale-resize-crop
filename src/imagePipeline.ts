@@ -59,6 +59,8 @@ export function drawTransformedImage(
   const sx = (flipH ? -1 : 1) * scale;
   const sy = (flipV ? -1 : 1) * scale;
 
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.save();
   ctx.translate(ox + drawnW / 2, oy + drawnH / 2);
   ctx.rotate(rad);
@@ -129,6 +131,8 @@ export function renderExportCanvas(
   if (!fctx) {
     throw new Error("Canvas unsupported");
   }
+  fctx.imageSmoothingEnabled = true;
+  fctx.imageSmoothingQuality = "high";
   drawTransformedImage(fctx, img, tw, th, rotationDeg, flipH, flipV);
 
   const c = crop ? clampCropToTransformed(crop, tw, th) : { x: 0, y: 0, w: tw, h: th };
@@ -141,6 +145,8 @@ export function renderExportCanvas(
   if (!octx) {
     throw new Error("Canvas unsupported");
   }
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = "high";
   octx.drawImage(full, c.x, c.y, c.w, c.h, 0, 0, outW, outH);
 
   return out;
