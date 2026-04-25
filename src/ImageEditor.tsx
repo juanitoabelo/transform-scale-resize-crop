@@ -475,82 +475,97 @@ const [crop, setCrop] = useState<CropRect | null>(null);
   };
 
   const clampToImageBounds = (point: { x: number; y: number }) => {
-    if (!tw || !th) return point;
-    const w = viewport.w || wrapRef.current?.clientWidth || 0;
-    const h = viewport.h || wrapRef.current?.clientHeight || 0;
-    const layout = fitTransformedRect(w, h, tw, th);
-    const x = Math.max(layout.ox, Math.min(layout.ox + layout.drawnW, point.x));
-    const y = Math.max(layout.oy, Math.min(layout.oy + layout.drawnH, point.y));
+    if (!bitmap) return point;
+    const outW = targetWidth || baseExportW;
+    const outH = targetHeight || baseExportH;
+    const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+    const displayW = outW * fitScale;
+    const displayH = outH * fitScale;
+    const ox = (viewport.w - displayW) / 2;
+    const oy = (viewport.h - displayH) / 2;
+
+    const x = Math.max(ox, Math.min(ox + displayW, point.x));
+    const y = Math.max(oy, Math.min(oy + displayH, point.y));
     return { x, y };
   };
 
   const getLayout = () => {
-    const w = viewport.w || wrapRef.current?.clientWidth || 0;
-    const h = viewport.h || wrapRef.current?.clientHeight || 0;
-    return { w, h, layout: fitTransformedRect(w, h, tw, th) };
+    const outW = targetWidth || baseExportW;
+    const outH = targetHeight || baseExportH;
+    const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+    const displayW = outW * fitScale;
+    const displayH = outH * fitScale;
+    const ox = (viewport.w - displayW) / 2;
+    const oy = (viewport.h - displayH) / 2;
+    return { w: viewport.w, h: viewport.h, layout: { scale: fitScale, ox, oy, drawnW: displayW, drawnH: displayH } };
   };
 
   const hitTestHandle = (p: { x: number; y: number }) => {
-    if (!crop || !tw || !th) return null;
-    const { layout } = getLayout();
-    const cr = cropToCanvasRect(crop, layout, tw, th);
+    if (!crop) return null;
+
+    const outW = targetWidth || baseExportW;
+    const outH = targetHeight || baseExportH;
+    const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+    const displayW = outW * fitScale;
+    const displayH = outH * fitScale;
+    const ox = (viewport.w - displayW) / 2;
+    const oy = (viewport.h - displayH) / 2;
+
+    // Convert crop (in output coords) to canvas display coords
+    const cx = ox + (crop.x / outW) * displayW;
+    const cy = oy + (crop.y / outH) * displayH;
+    const cw = (crop.w / outW) * displayW;
+    const ch = (crop.h / outH) * displayH;
+
     const pad = 10;
-    const inside =
-      p.x >= cr.x + pad &&
-      p.x <= cr.x + cr.w - pad &&
-      p.y >= cr.y + pad &&
-      p.y <= cr.y + cr.h - pad;
-    const near = (ax: number, ay: number) =>
-      Math.abs(p.x - ax) <= pad && Math.abs(p.y - ay) <= pad;
-    const nearH = (ay: number) => Math.abs(p.y - ay) <= pad;
-    const nearV = (ax: number) => Math.abs(p.x - ax) <= pad;
 
-    const left = cr.x;
-    const right = cr.x + cr.w;
-    const top = cr.y;
-    const bottom = cr.y + cr.h;
-    const midX = cr.x + cr.w / 2;
-    const midY = cr.y + cr.h / 2;
+    // Check if inside crop selection (for moving)
+    if (p.x >= cx + pad && p.x <= cx + cw - pad && p.y >= cy + pad && p.y <= cy + ch - pad) {
+      return { kind: "move" as const };
+    }
 
-    if (near(left, top)) return { kind: "resize" as const, handle: "nw" as const };
-    if (near(right, top)) return { kind: "resize" as const, handle: "ne" as const };
-    if (near(left, bottom)) return { kind: "resize" as const, handle: "sw" as const };
-    if (near(right, bottom)) return { kind: "resize" as const, handle: "se" as const };
-    if (near(midX, top) && p.x >= left && p.x <= right) return { kind: "resize" as const, handle: "n" as const };
-    if (near(midX, bottom) && p.x >= left && p.x <= right) return { kind: "resize" as const, handle: "s" as const };
-    if (near(left, midY) && p.y >= top && p.y <= bottom) return { kind: "resize" as const, handle: "w" as const };
-    if (near(right, midY) && p.y >= top && p.y <= bottom) return { kind: "resize" as const, handle: "e" as const };
-    if (inside) return { kind: "move" as const };
-    if (
-      nearV(left) &&
-      p.y >= top - pad &&
-      p.y <= bottom + pad
-    )
-      return { kind: "resize" as const, handle: "w" as const };
-    if (
-      nearV(right) &&
-      p.y >= top - pad &&
-      p.y <= bottom + pad
-    )
-      return { kind: "resize" as const, handle: "e" as const };
-    if (
-      nearH(top) &&
-      p.x >= left - pad &&
-      p.x <= right + pad
-    )
-      return { kind: "resize" as const, handle: "n" as const };
-    if (
-      nearH(bottom) &&
-      p.x >= left - pad &&
-      p.x <= right + pad
-    )
-      return { kind: "resize" as const, handle: "s" as const };
+    // Check corner handles for resizing
+    const handleSize = 12;
+    const corners = [
+      { x: cx, y: cy, h: "nw" },
+      { x: cx + cw, y: cy, h: "ne" },
+      { x: cx, y: cy + ch, h: "sw" },
+      { x: cx + cw, y: cy + ch, h: "se" },
+    ];
+
+    for (const c of corners) {
+      if (Math.abs(p.x - c.x) <= handleSize && Math.abs(p.y - c.y) <= handleSize) {
+        return { kind: "resize" as const, handle: c.h as any };
+      }
+    }
+
     return null;
   };
 
   const setCropFromCanvasRect = (rect: CropRect) => {
-    const { layout } = getLayout();
-    setCrop(canvasRectToCrop(rect, layout, tw, th));
+    // Convert canvas display coords to output coords
+    const outW = targetWidth || baseExportW;
+    const outH = targetHeight || baseExportH;
+    const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+    const displayW = outW * fitScale;
+    const displayH = outH * fitScale;
+    const ox = (viewport.w - displayW) / 2;
+    const oy = (viewport.h - displayH) / 2;
+
+    // Convert from display coords to output coords
+    const cropX = ((rect.x - ox) / displayW) * outW;
+    const cropY = ((rect.y - oy) / displayH) * outH;
+    const cropW = (rect.w / displayW) * outW;
+    const cropH = (rect.h / displayH) * outH;
+
+    // Clamp to valid range
+    const clampedCrop = {
+      x: Math.max(0, Math.min(cropX, outW)),
+      y: Math.max(0, Math.min(cropY, outH)),
+      w: Math.max(1, Math.min(cropW, outW - cropX)),
+      h: Math.max(1, Math.min(cropH, outH - cropY)),
+    };
+    setCrop(clampedCrop);
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -628,6 +643,7 @@ const [crop, setCrop] = useState<CropRect | null>(null);
       return;
     }
 
+    // Start new crop selection - use current click position and track drag
     dragModeRef.current = { kind: "new", start: p };
     dragStartRef.current = p;
     setDragging(true);
@@ -636,31 +652,30 @@ const [crop, setCrop] = useState<CropRect | null>(null);
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     // Hover detection for corner handle
-    if (bitmap) {
-      const el = wrapRef.current;
-      if (el) {
-        const outW = targetWidth || baseExportW;
-        const outH = targetHeight || baseExportH;
-        const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
-        const displayW = outW * fitScale;
-        const displayH = outH * fitScale;
-        const ox = (viewport.w - displayW) / 2;
-        const oy = (viewport.h - displayH) / 2;
-        const rect = el.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
-        const hs = 16;
-
-        // Check all 4 corners
-        const nearAnyCorner = (
-          (Math.abs(px - ox) < hs || Math.abs(px - (ox + displayW)) < hs) &&
-          (Math.abs(py - oy) < hs || Math.abs(py - (oy + displayH)) < hs)
-        );
-        setHoveringCorner(nearAnyCorner);
-      }
+    if (!bitmap || !wrapRef.current) {
+      setHoveringCorner(false);
+      return;
     }
 
-    // Handle panning - allow dragging image anywhere in the frame
+    const outW = targetWidth || baseExportW;
+    const outH = targetHeight || baseExportH;
+    const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+    const displayW = outW * fitScale;
+    const displayH = outH * fitScale;
+    const ox = (viewport.w - displayW) / 2;
+    const oy = (viewport.h - displayH) / 2;
+    const rect = wrapRef.current.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+
+    const hs = 16;
+    const nearAnyCorner = (
+      (Math.abs(px - ox) < hs || Math.abs(px - (ox + displayW)) < hs) &&
+      (Math.abs(py - oy) < hs || Math.abs(py - (oy + displayH)) < hs)
+    );
+    setHoveringCorner(nearAnyCorner);
+
+    // Handle panning
     if (panning && panStartRef.current && mode === "pan") {
       const start = panStartRef.current;
       const outW = targetWidth || baseExportW;
