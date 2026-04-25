@@ -190,3 +190,52 @@ export function canvasToBlob(
     }
   });
 }
+
+export function drawTransformedImageScaled(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  outW: number,
+  outH: number,
+  rotationDeg: number,
+  flipH: boolean,
+  flipV: boolean,
+  crop: CropRect | null,
+  _scale: number,
+  ox: number,
+  oy: number,
+  drawnW: number,
+  drawnH: number
+): void {
+  const nw = img.naturalWidth;
+  const nh = img.naturalHeight;
+  const { tw, th } = transformedDimensions(nw, nh, rotationDeg);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  // Create full-size canvas with transformations applied
+  const full = document.createElement("canvas");
+  full.width = tw;
+  full.height = th;
+  const fctx = full.getContext("2d");
+  if (!fctx) return;
+  fctx.imageSmoothingEnabled = true;
+  fctx.imageSmoothingQuality = "high";
+  drawTransformedImage(fctx, img, tw, th, rotationDeg, flipH, flipV);
+
+  // Apply crop if any, then draw to target size
+  const c = crop ? clampCropToTransformed(crop, tw, th) : { x: 0, y: 0, w: tw, h: th };
+
+  // Create output canvas at target dimensions
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = outH;
+  const octx = out.getContext("2d");
+  if (!octx) return;
+  octx.imageSmoothingEnabled = true;
+  octx.imageSmoothingQuality = "high";
+  octx.drawImage(full, c.x, c.y, c.w, c.h, 0, 0, outW, outH);
+
+  // Scale and draw to display canvas
+  ctx.drawImage(out, 0, 0, outW, outH, ox, oy, drawnW, drawnH);
+}

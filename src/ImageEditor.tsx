@@ -8,6 +8,7 @@ import {
   cropToCanvasRect,
   canvasToBlob,
   drawTransformedImage,
+  drawTransformedImageScaled,
   fitTransformedRect,
   renderExportCanvas,
   transformedDimensions,
@@ -68,8 +69,8 @@ export function ImageEditor() {
   const [rotation, setRotation] = useState(0);
   const [flipH, setFlipH] = useState(false);
   const [flipV, setFlipV] = useState(false);
-  const [crop, setCrop] = useState<CropRect | null>(null);
-  const [draft, setDraft] = useState<CropRect | null>(null);
+const [crop, setCrop] = useState<CropRect | null>(null);
+  const [_draft, setDraft] = useState<CropRect | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizePercent, setResizePercent] = useState(100);
   const [targetWidth, setTargetWidth] = useState(0);
@@ -102,6 +103,9 @@ export function ImageEditor() {
   const previewRenderTokenRef = useRef(0);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  const [canvasResizing, setCanvasResizing] = useState(false);
+  const [hoveringCorner, setHoveringCorner] = useState(false);
+  const canvasResizeStartRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const dragModeRef = useRef<
     | null
     | {
@@ -355,6 +359,16 @@ export function ImageEditor() {
     const canvas = canvasRef.current;
     const { w, h } = viewport;
     if (!canvas || !bitmap || tw === 0 || w < 2 || h < 2) return;
+
+    // Use target dimensions if set, otherwise use base export dimensions
+    const outW = targetWidth || baseExportW;
+    const outH = targetHeight || baseExportH;
+
+    // Calculate display dimensions fitting in viewport while keeping aspect ratio
+    const displayW = Math.min(w, outW);
+    const displayH = Math.min(h, outH);
+    const scale = Math.min(displayW / outW, displayH / outH, 1);
+
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
@@ -364,45 +378,55 @@ export function ImageEditor() {
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
-    drawTransformedImage(ctx, bitmap, w, h, rotation, flipH, flipV);
 
-    const layout = fitTransformedRect(w, h, tw, th);
+    // Calculate image display rect (centered in canvas)
+    const drawnW = Math.max(1, Math.round(outW * scale));
+    const drawnH = Math.max(1, Math.round(outH * scale));
+    const ox = Math.round((w - drawnW) / 2);
+    const oy = Math.round((h - drawnH) / 2);
+
+    // Draw the transformed and cropped image at target dimensions
+    drawTransformedImageScaled(ctx, bitmap, outW, outH, rotation, flipH, flipV, crop, scale, ox, oy, drawnW, drawnH);
+
+    // Draw output bounds rectangle
     ctx.save();
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+    ctx.lineWidth = 1;
     ctx.setLineDash([6, 4]);
-    const drawOutline = (r: CropRect, stroke: string) => {
-      ctx.strokeStyle = stroke;
-      ctx.strokeRect(r.x + 0.5, r.y + 0.5, Math.max(0, r.w - 1), Math.max(0, r.h - 1));
-    };
-    if (crop) {
-      drawOutline(
-        cropToCanvasRect(crop, layout, tw, th),
-        "rgba(255, 255, 255, 0.95)"
-      );
-      // Handles (only visual; hit test uses same geometry)
-      const cr = cropToCanvasRect(crop, layout, tw, th);
-      const hs = 8;
-      const pts = [
-        { x: cr.x, y: cr.y },
-        { x: cr.x + cr.w, y: cr.y },
-        { x: cr.x, y: cr.y + cr.h },
-        { x: cr.x + cr.w, y: cr.y + cr.h },
-        { x: cr.x + cr.w / 2, y: cr.y },
-        { x: cr.x + cr.w / 2, y: cr.y + cr.h },
-        { x: cr.x, y: cr.y + cr.h / 2 },
-        { x: cr.x + cr.w, y: cr.y + cr.h / 2 },
-      ];
+    ctx.strokeRect(ox + 0.5, oy + 0.5, drawnW - 1, drawnH - 1);
+
+    // Draw resize handle in bottom-right corner
+    if (bitmap) {
+      const handleSize = 12;
       ctx.setLineDash([]);
       ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-      for (const p of pts) {
-        ctx.fillRect(p.x - hs / 2, p.y - hs / 2, hs, hs);
-      }
+      ctx.strokeStyle = "rgba(30, 64, 175, 0.9)";
+      ctx.lineWidth = 2;
+
+      // Corner box
+      ctx.fillRect(ox + drawnW - handleSize, oy + drawnH - handleSize, handleSize, handleSize);
+      ctx.strokeRect(ox + drawnW - handleSize, oy + drawnH - handleSize, handleSize, handleSize);
+
+      // Dimension labels
+      ctx.font = "11px system-ui, -apple-system, sans-serif";
+      ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.fillText(`${outW}×${outH}`, ox + drawnW - handleSize - 8, oy - 6);
     }
-    if (draft && draft.w > 1 && draft.h > 1) {
-      drawOutline(draft, "rgba(100, 200, 255, 0.95)");
+
+    // Draw crop rect if exists
+    if (crop && baseExportW > 0 && baseExportH > 0) {
+      const cropX = ox + (crop.x / outW) * drawnW;
+      const cropY = oy + (crop.y / outH) * drawnH;
+      const cropW = (crop.w / outW) * drawnW;
+      const cropH = (crop.h / outH) * drawnH;
+      ctx.setLineDash([]);
+      ctx.strokeStyle = "rgba(100, 200, 255, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cropX + 0.5, cropY + 0.5, cropW - 1, cropH - 1);
     }
+
     ctx.restore();
-  }, [viewport, bitmap, rotation, flipH, flipV, crop, draft, tw, th]);
+  }, [viewport, bitmap, rotation, flipH, flipV, crop, tw, th, targetWidth, targetHeight, baseExportW, baseExportH]);
 
   const overlayPointer = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = wrapRef.current;
@@ -493,6 +517,35 @@ export function ImageEditor() {
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Handle canvas corner resize with Command key
+    if (bitmap && (e.metaKey || e.ctrlKey)) {
+      const el = wrapRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const outW = targetWidth || baseExportW;
+      const outH = targetHeight || baseExportH;
+      const scale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+      const drawnW = Math.max(1, Math.round(outW * scale));
+      const drawnH = Math.max(1, Math.round(outH * scale));
+      const ox = (viewport.w - drawnW) / 2;
+      const oy = (viewport.h - drawnH) / 2;
+      const handleSize = 16;
+      const cx = ox + drawnW - handleSize / 2;
+      const cy = oy + drawnH - handleSize / 2;
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+
+      // Check if clicking near corner handle
+      if (px >= cx - handleSize && px <= cx + handleSize && py >= cy - handleSize && py <= cy + handleSize) {
+        try {
+          e.currentTarget.setPointerCapture(e.pointerId);
+        } catch { /* ignore */ }
+        canvasResizeStartRef.current = { x: e.clientX, y: e.clientY, w: outW, h: outH };
+        setCanvasResizing(true);
+        return;
+      }
+    }
+
     if (!bitmap || mode !== "crop") return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -530,6 +583,58 @@ export function ImageEditor() {
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    // Handle hover detection for corner handle
+    if (bitmap) {
+      const el = wrapRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const outW = targetWidth || baseExportW;
+        const outH = targetHeight || baseExportH;
+        const scale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+        const drawnW = Math.max(1, Math.round(outW * scale));
+        const drawnH = Math.max(1, Math.round(outH * scale));
+        const ox = (viewport.w - drawnW) / 2;
+        const oy = (viewport.h - drawnH) / 2;
+        const handleSize = 20;
+        const cx = ox + drawnW - handleSize / 2;
+        const cy = oy + drawnH - handleSize / 2;
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const nearCorner = px >= cx - handleSize && px <= cx + handleSize && py >= cy - handleSize && py <= cy + handleSize;
+        setHoveringCorner(nearCorner);
+      }
+    }
+
+    // Handle canvas resize with Command+drag
+    if (canvasResizing && canvasResizeStartRef.current) {
+      const start = canvasResizeStartRef.current;
+      const dx = (e.clientX - start.x);
+      const dy = (e.clientY - start.y);
+
+      // Calculate new dimensions based on drag
+      let newW = start.w + dx;
+      let newH = start.h + dy;
+
+      // Clamp minimum size
+      newW = Math.max(10, newW);
+      newH = Math.max(10, newH);
+
+      // Lock aspect ratio if enabled
+      if (lockAspect && start.w > 0 && start.h > 0) {
+        const aspect = start.w / start.h;
+        if (Math.abs(dx) >= Math.abs(dy)) {
+          newH = Math.round(newW / aspect);
+        } else {
+          newW = Math.round(newH * aspect);
+        }
+      }
+
+      setTargetWidth(newW);
+      setTargetHeight(newH);
+      setResizePercent(Math.round((newW / baseExportW) * 100));
+      return;
+    }
+
     if (!dragging || !dragStartRef.current || mode !== "crop") return;
     const raw = overlayPointer(e);
     const p = raw ? clampToImageBounds(raw) : undefined;
@@ -655,6 +760,13 @@ export function ImageEditor() {
     } catch {
       /* ignore */
     }
+    // Handle canvas resize end
+    if (canvasResizing) {
+      setCanvasResizing(false);
+      canvasResizeStartRef.current = null;
+      return;
+    }
+
     if (!dragging || !bitmap || mode !== "crop") {
       setDragging(false);
       dragStartRef.current = null;
@@ -866,7 +978,7 @@ export function ImageEditor() {
           <div
             className="position-absolute top-0 start-0 w-100 h-100"
             style={{
-              cursor: bitmap && mode === "crop" ? "crosshair" : "default",
+              cursor: canvasResizing || hoveringCorner ? "nwse-resize" : (bitmap && mode === "crop" ? "crosshair" : "default"),
               touchAction: "none",
             }}
             onPointerDown={onPointerDown}
