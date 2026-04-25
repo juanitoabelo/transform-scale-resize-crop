@@ -8,7 +8,6 @@ import {
   cropToCanvasRect,
   canvasToBlob,
   drawTransformedImage,
-  drawTransformedImageScaled,
   fitTransformedRect,
   renderExportCanvas,
   transformedDimensions,
@@ -363,18 +362,20 @@ const [crop, setCrop] = useState<CropRect | null>(null);
     const { w, h } = viewport;
     if (!canvas || !bitmap || tw === 0 || w < 2 || h < 2) return;
 
-    // Use target dimensions if set, otherwise use base export dimensions
+    // Target output dimensions from resize controls
     const outW = targetWidth || baseExportW;
     const outH = targetHeight || baseExportH;
 
-    // Calculate display dimensions fitting in viewport while keeping aspect ratio
-    const displayW = Math.min(w, outW);
-    const displayH = Math.min(h, outH);
-    const scale = Math.min(displayW / outW, displayH / outH, 1);
+    // Fit the output dimensions in viewport (maintaining aspect ratio, no distortion!)
+    const fitScale = Math.min(w / outW, h / outH, 1);
+    const displayW = outW * fitScale;
+    const displayH = outH * fitScale;
+    const ox = (w - displayW) / 2;
+    const oy = (h - displayH) / 2;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     const ctx = canvas.getContext("2d");
@@ -382,54 +383,79 @@ const [crop, setCrop] = useState<CropRect | null>(null);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    // Calculate image display rect (centered in canvas)
-    const drawnW = Math.max(1, Math.round(outW * scale));
-    const drawnH = Math.max(1, Math.round(outH * scale));
-    const ox = Math.round((w - drawnW) / 2);
-    const oy = Math.round((h - drawnH) / 2);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
 
-    // Draw the transformed and cropped image at target dimensions
-    drawTransformedImageScaled(ctx, bitmap, outW, outH, rotation, flipH, flipV, crop, scale, ox, oy, drawnW, drawnH, panOffset.x, panOffset.y);
+    // Step 1: Create full-size transformed image
+    const full = document.createElement("canvas");
+    full.width = tw;
+    full.height = th;
+    const fctx = full.getContext("2d");
+    if (!fctx) return;
+    fctx.imageSmoothingEnabled = true;
+    fctx.imageSmoothingQuality = "high";
+    drawTransformedImage(fctx, bitmap, tw, th, rotation, flipH, flipV);
 
-    // Draw output bounds rectangle
+    // Step 2: Scale to output dimensions (this is the resize operation)
+    const outCanvas = document.createElement("canvas");
+    outCanvas.width = outW;
+    outCanvas.height = outH;
+    const octx = outCanvas.getContext("2d");
+    if (!octx) return;
+    octx.imageSmoothingEnabled = true;
+    octx.imageSmoothingQuality = "high";
+    octx.drawImage(full, 0, 0);
+
+    // Step 3: Scale to display size and draw on canvas
+    ctx.drawImage(outCanvas, 0, 0, outW, outH, ox, oy, displayW, displayH);
+
+    // Draw crop rect overlay if exists
     ctx.save();
     ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
     ctx.lineWidth = 1;
     ctx.setLineDash([6, 4]);
-    ctx.strokeRect(ox + 0.5, oy + 0.5, drawnW - 1, drawnH - 1);
+    ctx.strokeRect(ox + 0.5, oy + 0.5, displayW - 1, displayH - 1);
 
-    // Draw resize handle in bottom-right corner
-    if (bitmap) {
-      const handleSize = 12;
+    // Crop selection
+    if (crop && outW > 0 && outH > 0) {
+      const cx = ox + (crop.x / outW) * displayW;
+      const cy = oy + (crop.y / outH) * displayH;
+      const cw = (crop.w / outW) * displayW;
+      const ch = (crop.h / outH) * displayH;
       ctx.setLineDash([]);
+      ctx.strokeStyle = "rgba(100, 200, 255, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(cx + 0.5, cy + 0.5, cw - 1, ch - 1);
+
+      // Corner handles
+      const hs = 8;
       ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-      ctx.strokeStyle = "rgba(30, 64, 175, 0.9)";
-      ctx.lineWidth = 2;
+      const handles = [[cx, cy], [cx + cw, cy], [cx, cy + ch], [cx + cw, cy + ch]];
+      for (const [hx, hy] of handles) {
+        ctx.fillRect(hx - hs / 2, hy - hs / 2, hs, hs);
+      }
 
-      // Corner box
-      ctx.fillRect(ox + drawnW - handleSize, oy + drawnH - handleSize, handleSize, handleSize);
-      ctx.strokeRect(ox + drawnW - handleSize, oy + drawnH - handleSize, handleSize, handleSize);
-
-      // Dimension labels
-      ctx.font = "11px system-ui, -apple-system, sans-serif";
+      // Crop dims
+      ctx.font = "11px system-ui";
       ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-      ctx.fillText(`${outW}×${outH}`, ox + drawnW - handleSize - 8, oy - 6);
+      ctx.fillText(`${Math.round(crop.w)}×${Math.round(crop.h)}`, cx + 4, cy - 6);
     }
 
-    // Draw crop rect if exists
-    if (crop && baseExportW > 0 && baseExportH > 0) {
-      const cropX = ox + (crop.x / outW) * drawnW;
-      const cropY = oy + (crop.y / outH) * drawnH;
-      const cropW = (crop.w / outW) * drawnW;
-      const cropH = (crop.h / outH) * drawnH;
-      ctx.setLineDash([]);
-      ctx.strokeStyle = "rgba(100, 200, 255, 0.9)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(cropX + 0.5, cropY + 0.5, cropW - 1, cropH - 1);
-    }
+    // Resize handle + output dims
+    const rhs = 12;
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+    ctx.strokeStyle = "rgba(30, 64, 175, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.fillRect(ox + displayW - rhs, oy + displayH - rhs, rhs, rhs);
+    ctx.strokeRect(ox + displayW - rhs, oy + displayH - rhs, rhs, rhs);
+
+    ctx.font = "11px system-ui";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+    ctx.fillText(`${outW}×${outH}`, ox + displayW - rhs - 8, oy - 6);
 
     ctx.restore();
-  }, [viewport, bitmap, rotation, flipH, flipV, crop, tw, th, targetWidth, targetHeight, baseExportW, baseExportH, panOffset]);
+  }, [viewport, bitmap, rotation, flipH, flipV, crop, tw, th, targetWidth, targetHeight, baseExportW, baseExportH]);
 
   const overlayPointer = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = wrapRef.current;
@@ -601,24 +627,23 @@ const [crop, setCrop] = useState<CropRect | null>(null);
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Handle hover detection for corner handle
+    // Hover detection for corner handle
     if (bitmap) {
       const el = wrapRef.current;
       if (el) {
-        const rect = el.getBoundingClientRect();
         const outW = targetWidth || baseExportW;
         const outH = targetHeight || baseExportH;
-        const scale = Math.min(viewport.w / outW, viewport.h / outH, 1);
-        const drawnW = Math.max(1, Math.round(outW * scale));
-        const drawnH = Math.max(1, Math.round(outH * scale));
-        const ox = (viewport.w - drawnW) / 2;
-        const oy = (viewport.h - drawnH) / 2;
-        const handleSize = 20;
-        const cx = ox + drawnW - handleSize / 2;
-        const cy = oy + drawnH - handleSize / 2;
+        const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+        const displayW = outW * fitScale;
+        const displayH = outH * fitScale;
+        const ox = (viewport.w - displayW) / 2;
+        const oy = (viewport.h - displayH) / 2;
+        const rect = el.getBoundingClientRect();
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
-        const nearCorner = px >= cx - handleSize && px <= cx + handleSize && py >= cy - handleSize && py <= cy + handleSize;
+        const handleSize = 20;
+        const nearCorner = px >= ox + displayW - handleSize && px <= ox + displayW + handleSize / 2 &&
+                        py >= oy + displayH - handleSize && py <= oy + displayH + handleSize / 2;
         setHoveringCorner(nearCorner);
       }
     }
@@ -628,18 +653,20 @@ const [crop, setCrop] = useState<CropRect | null>(null);
       const start = panStartRef.current;
       const outW = targetWidth || baseExportW;
       const outH = targetHeight || baseExportH;
-      const displayScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+      const fitScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
 
-      const dx = (e.clientX - start.x) / displayScale;
-      const dy = (e.clientY - start.y) / displayScale;
+      const dx = (e.clientX - start.x) / fitScale;
+      const dy = (e.clientY - start.y) / fitScale;
 
-      const maxPanX = Math.max(0, (outW - tw) / 2);
-      const maxPanY = Math.max(0, (outH - th) / 2);
+      const newPanX = start.panX + dx;
+      const newPanY = start.panY + dy;
 
-      const newPanX = Math.max(-maxPanX, Math.min(maxPanX, start.panX + dx));
-      const newPanY = Math.max(-maxPanY, Math.min(maxPanY, start.panY + dy));
-
-      setPanOffset({ x: newPanX, y: newPanY });
+      // Clamp to bounds (not all the way to center though)
+      const maxPan = Math.max(tw / 2, outW / 2);
+      setPanOffset({
+        x: Math.max(-maxPan, Math.min(maxPan, newPanX)),
+        y: Math.max(-maxPan, Math.min(maxPan, newPanY)),
+      });
       return;
     }
 
