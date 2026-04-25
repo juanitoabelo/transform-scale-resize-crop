@@ -222,6 +222,13 @@ export function ImageEditor() {
   const baseExportW = Math.round(crop ? crop.w : tw);
   const baseExportH = Math.round(crop ? crop.h : th);
 
+  const aspectRatioDisplay = (() => {
+    if (!baseExportW || !baseExportH) return null;
+    const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+    const g = gcd(baseExportW, baseExportH);
+    return `${baseExportW / g}:${baseExportH / g}`;
+  })();
+
   useEffect(() => {
     if (!bitmap || tw === 0 || th === 0) return;
     setTargetWidth(baseExportW);
@@ -241,13 +248,22 @@ export function ImageEditor() {
     setRenderingPreview(true);
     const rafId = window.requestAnimationFrame(() => {
       if (previewRenderTokenRef.current !== token) return;
-      const maxW = 360;
-      const maxH = 240;
       const outW = Math.max(1, targetWidth || baseExportW || tw);
       const outH = Math.max(1, targetHeight || baseExportH || th);
-      const previewScale = Math.min(maxW / outW, maxH / outH, 1);
-      const pw = Math.max(1, Math.round(outW * previewScale));
-      const ph = Math.max(1, Math.round(outH * previewScale));
+
+      // Calculate preview size at correct aspect ratio, max 400px to fit preview area
+      const maxPreview = 400;
+      const aspectRatio = outW / outH;
+      let pw: number, ph: number;
+      if (aspectRatio >= 1) {
+        pw = Math.min(outW, maxPreview);
+        ph = Math.round(pw / aspectRatio);
+      } else {
+        ph = Math.min(outH, maxPreview);
+        pw = Math.round(ph * aspectRatio);
+      }
+      pw = Math.max(1, pw);
+      ph = Math.max(1, ph);
 
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = Math.round(pw * dpr);
@@ -1148,8 +1164,9 @@ export function ImageEditor() {
                   </div>
                 )}
                 <p className="small text-secondary mt-2 mb-0">
-                  Preview scales to fit, export uses {targetWidth || baseExportW}×
-                  {targetHeight || baseExportH}px.
+                  Output: {targetWidth || baseExportW}×{targetHeight || baseExportH}px
+                  {crop ? ` · Crop ${Math.round(crop.w)}×${Math.round(crop.h)}px` : ""}
+                  {aspectRatioDisplay ? ` · ${aspectRatioDisplay}` : ""}
                 </p>
               </div>
             </div>
