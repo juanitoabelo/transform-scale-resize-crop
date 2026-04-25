@@ -406,8 +406,10 @@ const [crop, setCrop] = useState<CropRect | null>(null);
     octx.imageSmoothingQuality = "high";
     octx.drawImage(full, 0, 0);
 
-    // Step 3: Scale to display size and draw on canvas
-    ctx.drawImage(outCanvas, 0, 0, outW, outH, ox, oy, displayW, displayH);
+    // Step 3: Scale to display size and draw on canvas with pan offset
+    const panDisplayX = (panOffset.x / outW) * displayW;
+    const panDisplayY = (panOffset.y / outH) * displayH;
+    ctx.drawImage(outCanvas, 0, 0, outW, outH, ox + panDisplayX, oy + panDisplayY, displayW, displayH);
 
     // Draw crop rect overlay if exists
     ctx.save();
@@ -441,21 +443,27 @@ const [crop, setCrop] = useState<CropRect | null>(null);
       ctx.fillText(`${Math.round(crop.w)}×${Math.round(crop.h)}`, cx + 4, cy - 6);
     }
 
-    // Resize handle + output dims
+    // Resize handles + output dims (4 corners)
     const rhs = 12;
     ctx.setLineDash([]);
     ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
     ctx.strokeStyle = "rgba(30, 64, 175, 0.9)";
     ctx.lineWidth = 2;
-    ctx.fillRect(ox + displayW - rhs, oy + displayH - rhs, rhs, rhs);
-    ctx.strokeRect(ox + displayW - rhs, oy + displayH - rhs, rhs, rhs);
+    ctx.fillRect(ox - rhs / 2, oy - rhs / 2, rhs, rhs);
+    ctx.strokeRect(ox - rhs / 2, oy - rhs / 2, rhs, rhs);
+    ctx.fillRect(ox + displayW - rhs / 2, oy - rhs / 2, rhs, rhs);
+    ctx.strokeRect(ox + displayW - rhs / 2, oy - rhs / 2, rhs, rhs);
+    ctx.fillRect(ox - rhs / 2, oy + displayH - rhs / 2, rhs, rhs);
+    ctx.strokeRect(ox - rhs / 2, oy + displayH - rhs / 2, rhs, rhs);
+    ctx.fillRect(ox + displayW - rhs / 2, oy + displayH - rhs / 2, rhs, rhs);
+    ctx.strokeRect(ox + displayW - rhs / 2, oy + displayH - rhs / 2, rhs, rhs);
 
     ctx.font = "11px system-ui";
     ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-    ctx.fillText(`${outW}×${outH}`, ox + displayW - rhs - 8, oy - 6);
+    ctx.fillText(`${outW}×${outH}`, ox - rhs / 2, oy - 14);
 
     ctx.restore();
-  }, [viewport, bitmap, rotation, flipH, flipV, crop, tw, th, targetWidth, targetHeight, baseExportW, baseExportH]);
+  }, [viewport, bitmap, rotation, flipH, flipV, crop, tw, th, targetWidth, targetHeight, baseExportW, baseExportH, panOffset]);
 
   const overlayPointer = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = wrapRef.current;
@@ -641,14 +649,18 @@ const [crop, setCrop] = useState<CropRect | null>(null);
         const rect = el.getBoundingClientRect();
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
-        const handleSize = 20;
-        const nearCorner = px >= ox + displayW - handleSize && px <= ox + displayW + handleSize / 2 &&
-                        py >= oy + displayH - handleSize && py <= oy + displayH + handleSize / 2;
-        setHoveringCorner(nearCorner);
+        const hs = 16;
+
+        // Check all 4 corners
+        const nearAnyCorner = (
+          (Math.abs(px - ox) < hs || Math.abs(px - (ox + displayW)) < hs) &&
+          (Math.abs(py - oy) < hs || Math.abs(py - (oy + displayH)) < hs)
+        );
+        setHoveringCorner(nearAnyCorner);
       }
     }
 
-    // Handle panning
+    // Handle panning - allow dragging image anywhere in the frame
     if (panning && panStartRef.current && mode === "pan") {
       const start = panStartRef.current;
       const outW = targetWidth || baseExportW;
@@ -661,11 +673,12 @@ const [crop, setCrop] = useState<CropRect | null>(null);
       const newPanX = start.panX + dx;
       const newPanY = start.panY + dy;
 
-      // Clamp to bounds (not all the way to center though)
-      const maxPan = Math.max(tw / 2, outW / 2);
+      // Allow dragging anywhere - can move image to any position
+      const maxPanX = outW / 2;
+      const maxPanY = outH / 2;
       setPanOffset({
-        x: Math.max(-maxPan, Math.min(maxPan, newPanX)),
-        y: Math.max(-maxPan, Math.min(maxPan, newPanY)),
+        x: Math.max(-maxPanX, Math.min(maxPanX, newPanX)),
+        y: Math.max(-maxPanY, Math.min(maxPanY, newPanY)),
       });
       return;
     }
