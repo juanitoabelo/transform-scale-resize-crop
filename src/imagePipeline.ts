@@ -200,11 +200,13 @@ export function drawTransformedImageScaled(
   flipH: boolean,
   flipV: boolean,
   crop: CropRect | null,
-  _scale: number,
+_scale: number,
   ox: number,
   oy: number,
   drawnW: number,
-  drawnH: number
+  drawnH: number,
+  panX: number = 0,
+  panY: number = 0
 ): void {
   const nw = img.naturalWidth;
   const nh = img.naturalHeight;
@@ -236,6 +238,9 @@ export function drawTransformedImageScaled(
   octx.imageSmoothingQuality = "high";
   octx.drawImage(full, c.x, c.y, c.w, c.h, 0, 0, outW, outH);
 
-  // Scale and draw to display canvas
-  ctx.drawImage(out, 0, 0, outW, outH, ox, oy, drawnW, drawnH);
+  // Scale and draw to display canvas with pan offset applied
+  // panX, panY are in output pixel coordinates
+  const displayPanX = (panX / outW) * drawnW;
+  const displayPanY = (panY / outH) * drawnH;
+  ctx.drawImage(out, 0, 0, outW, outH, ox + displayPanX, oy + displayPanY, drawnW, drawnH);
 }

@@ -65,7 +65,8 @@ function isSupportedFile(file: File): boolean {
 export function ImageEditor() {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [bitmap, setBitmap] = useState<HTMLImageElement | null>(null);
-  const [mode, setMode] = useState<"transform" | "crop">("transform");
+  const [mode, setMode] = useState<"transform" | "crop" | "pan">("transform");
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState(0);
   const [flipH, setFlipH] = useState(false);
   const [flipV, setFlipV] = useState(false);
@@ -104,6 +105,8 @@ const [crop, setCrop] = useState<CropRect | null>(null);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
   const [canvasResizing, setCanvasResizing] = useState(false);
+  const [panning, setPanning] = useState(false);
+  const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const [hoveringCorner, setHoveringCorner] = useState(false);
   const canvasResizeStartRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const dragModeRef = useRef<
@@ -386,7 +389,7 @@ const [crop, setCrop] = useState<CropRect | null>(null);
     const oy = Math.round((h - drawnH) / 2);
 
     // Draw the transformed and cropped image at target dimensions
-    drawTransformedImageScaled(ctx, bitmap, outW, outH, rotation, flipH, flipV, crop, scale, ox, oy, drawnW, drawnH);
+    drawTransformedImageScaled(ctx, bitmap, outW, outH, rotation, flipH, flipV, crop, scale, ox, oy, drawnW, drawnH, panOffset.x, panOffset.y);
 
     // Draw output bounds rectangle
     ctx.save();
@@ -426,7 +429,7 @@ const [crop, setCrop] = useState<CropRect | null>(null);
     }
 
     ctx.restore();
-  }, [viewport, bitmap, rotation, flipH, flipV, crop, tw, th, targetWidth, targetHeight, baseExportW, baseExportH]);
+  }, [viewport, bitmap, rotation, flipH, flipV, crop, tw, th, targetWidth, targetHeight, baseExportW, baseExportH, panOffset]);
 
   const overlayPointer = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = wrapRef.current;
@@ -546,6 +549,21 @@ const [crop, setCrop] = useState<CropRect | null>(null);
       }
     }
 
+    // Handle Pan mode
+    if (bitmap && mode === "pan") {
+      const el = wrapRef.current;
+      if (!el) return;
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch { /* ignore */ }
+      const raw = overlayPointer(e);
+      const p = raw || undefined;
+      if (!p) return;
+      panStartRef.current = { x: e.clientX, y: e.clientY, panX: panOffset.x, panY: panOffset.y };
+      setPanning(true);
+      return;
+    }
+
     if (!bitmap || mode !== "crop") return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -603,6 +621,26 @@ const [crop, setCrop] = useState<CropRect | null>(null);
         const nearCorner = px >= cx - handleSize && px <= cx + handleSize && py >= cy - handleSize && py <= cy + handleSize;
         setHoveringCorner(nearCorner);
       }
+    }
+
+    // Handle panning
+    if (panning && panStartRef.current && mode === "pan") {
+      const start = panStartRef.current;
+      const outW = targetWidth || baseExportW;
+      const outH = targetHeight || baseExportH;
+      const displayScale = Math.min(viewport.w / outW, viewport.h / outH, 1);
+
+      const dx = (e.clientX - start.x) / displayScale;
+      const dy = (e.clientY - start.y) / displayScale;
+
+      const maxPanX = Math.max(0, (outW - tw) / 2);
+      const maxPanY = Math.max(0, (outH - th) / 2);
+
+      const newPanX = Math.max(-maxPanX, Math.min(maxPanX, start.panX + dx));
+      const newPanY = Math.max(-maxPanY, Math.min(maxPanY, start.panY + dy));
+
+      setPanOffset({ x: newPanX, y: newPanY });
+      return;
     }
 
     // Handle canvas resize with Command+drag
@@ -764,6 +802,13 @@ const [crop, setCrop] = useState<CropRect | null>(null);
     if (canvasResizing) {
       setCanvasResizing(false);
       canvasResizeStartRef.current = null;
+      return;
+    }
+
+    // Handle panning end
+    if (panning) {
+      setPanning(false);
+      panStartRef.current = null;
       return;
     }
 
@@ -978,7 +1023,7 @@ const [crop, setCrop] = useState<CropRect | null>(null);
           <div
             className="position-absolute top-0 start-0 w-100 h-100"
             style={{
-              cursor: canvasResizing || hoveringCorner ? "nwse-resize" : (bitmap && mode === "crop" ? "crosshair" : "default"),
+              cursor: canvasResizing || hoveringCorner ? "nwse-resize" : (panning ? "grabbing" : (bitmap && mode === "pan" ? "grab" : (bitmap && mode === "crop" ? "crosshair" : "default"))),
               touchAction: "none",
             }}
             onPointerDown={onPointerDown}
@@ -1052,6 +1097,16 @@ const [crop, setCrop] = useState<CropRect | null>(null);
                 <button
                   type="button"
                   className={`btn btn-sm ${
+                    mode === "pan" ? "btn-primary" : "btn-outline-primary"
+                  }`}
+                  disabled={!bitmap}
+                  onClick={() => setMode("pan")}
+                >
+                  Move
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${
                     mode === "crop" ? "btn-primary" : "btn-outline-primary"
                   }`}
                   disabled={!bitmap}
@@ -1099,6 +1154,7 @@ const [crop, setCrop] = useState<CropRect | null>(null);
                     setRotation(0);
                     setFlipH(false);
                     setFlipV(false);
+                    setPanOffset({ x: 0, y: 0 });
                   }}
                 >
                   Reset transform
